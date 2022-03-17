@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# emacs backup
+*~
+
+# OSX metadata
+.DS_Store
