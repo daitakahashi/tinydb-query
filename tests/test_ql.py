@@ -27,37 +27,110 @@ def _db_instance(tmp_path):
              'BVW': 1050},
             {'title': 'Brandenburg Concertos', 'composer': 'J. S. Bach',
              'no': 6, 'key': 'B-flat major',
-             'BVW': 1051}
+             'BVW': 1051},
+            {'title': 'Sonata in C minor', 'composer': 'Franz Schubert',
+             'key': 'C minor',
+             'D': 958},
+            {'title': 'Sonata in A mojor', 'composer': 'Franz Schubert',
+             'key': 'A mojor',
+             'D': 959},
+            {'title': 'Sonata in B-flat mojor', 'composer': 'Franz Schubert',
+             'key': 'B-flat mojor',
+             'D': 960}
         ])
         yield db
 
 
-def test_query_exists(db_instance):
-    result = db_instance.search(
-        Query({'no': {'$exists': True}}).as_tinydb_query()
+@pytest.mark.parametrize(('ql', 'tdb_query', 'exists'), [
+    (
+        {'D': {'$exists': True}},
+        tinydb.Query().D.exists(),
+        True
+    ), (
+        {'D': {'$exists': False}},
+        ~tinydb.Query().D.exists(),
+        True
+    ), (
+        {'title': {'$matches': 'Gold'}},
+        tinydb.Query().title.matches('Gold'),
+        True
+    ), (
+        {'title': {'$matches': 'Con.*$'}},
+        tinydb.Query().title.matches('Con.*$'),
+        False
+    ), (
+        {'title': {'$matches': '^Gold.*ns$'}},
+        tinydb.Query().title.matches('^Gold.*ns$'),
+        True
+    ), (
+        {'title': {'$matches': {'$re': '^Gold.*ns$'}}},
+        tinydb.Query().title.matches('^Gold.*ns$'),
+        True
+    ), (
+        {'key': {'$search': 'flat'}},
+        tinydb.Query().key.search('flat'),
+        True
+    ), (
+        {'title': {'$search': {'$re': 'C.*o'}}},
+        tinydb.Query().title.search('C.*o'),
+        True
+    ), (
+        {'title': {'$re': 'C.*o'}},
+        tinydb.Query().title.search('C.*o'),
+        True
+    ), (
+        {'$fragment': {'no': 6, 'composer': 'J. S. Bach'}},
+        tinydb.Query().fragment({'no': 6, 'composer': 'J. S. Bach'}),
+        True
+    ), (
+        {'$and': [{'composer': 'J. S. Bach'}, {'no': {'$gt': 2}}]},
+        (tinydb.Query().composer == 'J. S. Bach') & (tinydb.Query().no > 2),
+        True
+    ), (
+        {'composer': 'J. S. Bach', 'no': {'$gt': 2}},
+        (tinydb.Query().composer == 'J. S. Bach') & (tinydb.Query().no > 2),
+        True
+    ), (
+        {'title': {'$and': [{'$search': 'Sonata'}, {'$search': 'A'}]}},
+        tinydb.Query().title.search('Sonata') & tinydb.Query().title.search('A'),
+        True
+    ), (
+        {'title': {'$and': [{'$re': 'Sonata'}, {'$re': 'A'}]}},
+        tinydb.Query().title.search('Sonata') & tinydb.Query().title.search('A'),
+        True
+    ), (
+        {'$or': [{'composer': 'Franz Schubert'}, {'no': {'$gt': 2}}]},
+        (tinydb.Query().composer == 'Franz Schubert') | (tinydb.Query().no > 2),
+        True
+    ), (
+        {'title': {'$or': [{'$search': 'Sonata'}, {'$search': 'G'}]}},
+        tinydb.Query().title.search('Sonata') | tinydb.Query().title.search('G'),
+        True
+    ), (
+        {'key': {'$or': ['F major', 'minor']}},
+        (tinydb.Query().key == 'F major') | (tinydb.Query().key == 'minor'),
+        True
+    ), (
+        {'key': {'$or': ['F major', {'$re': 'minor'}]}},
+        (tinydb.Query().key == 'F major') | (tinydb.Query().key.search('minor')),
+        True
     )
-    assert len(result) == 6
+])
+def test_query(db_instance, ql, tdb_query, exists):
+    result = db_instance.search(Query(ql))
+    assert bool(result) is exists
+    assert result == db_instance.search(tdb_query)
 
-    result = db_instance.search(
-        Query({'no': {'$exists': False}}).as_tinydb_query()
+
+@pytest.mark.parametrize(('ql', 'exception'), [
+    (
+        {'$and': [{'$search': 'J. S. Bach'}]},
+        ValueError
+     ), (
+        {'$or': [{'$search': 'J. S. Bach'}]},
+        ValueError
     )
-    assert len(result) == 1
-
-
-def test_query_matches(db_instance):
-    result = db_instance.search(
-        Query({'title': {'$matches': 'Gold'}}).as_tinydb_query()
-    )
-    assert len(result) == 1
-
-    result = db_instance.search(
-        Query({'title': {'$matches': {'$regex': '^Gold.*ns$'}}}).as_tinydb_query()
-    )
-    assert len(result) == 1
-
-
-def test_query_search(db_instance):
-    result = db_instance.search(
-        Query({'key': {'$search': 'flat'}}).as_tinydb_query()
-    )
-    assert len(result) == 1
+])
+def test_query_error(ql, exception):
+    with pytest.raises(exception):
+        Query(ql)
