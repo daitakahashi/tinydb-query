@@ -2,13 +2,18 @@ import functools
 import numbers
 import operator
 import re
-from collections.abc import Iterable, Sized
+from collections.abc import Sized
+from collections import deque
 
 import jsonschema
 import tinydb
 
 
-class LoadError(Exception):
+class LoadError(TypeError):
+    pass
+
+
+class QLSyntaxError(ValueError):
     pass
 
 
@@ -35,12 +40,14 @@ def ident(data):
     return data
 
 
-def get_referenced_class(target):
-    available_classes = {
-        cls.__name__: cls
-        for cls in ParsedObject.__subclasses__()
-    }
-    return available_classes[target]
+def get_referenced_class():
+    def _collect_subclass(cls):
+        available_classes[cls.__name__] = cls
+        for _cls in cls.__subclasses__():
+            _collect_subclass(_cls)
+    available_classes = {}
+    _collect_subclass(ParsedObject)
+    return available_classes
 
 
 class LoadAll:
@@ -63,7 +70,8 @@ class LoadAnyOf:
 
 class LoadRef:
     def __init__(self, spec):
-        self._ref = get_referenced_class(spec['$ref'])
+        available_classes = get_referenced_class()
+        self._ref = available_classes[spec['$ref']]
 
     def load(self, data):
         return self._ref(data)
@@ -175,17 +183,19 @@ class Loader:
 
 def spec_to_schema(spec):
     schema = {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$defs": {}
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
     }
+    defs = {}
+    available_classes = get_referenced_class()
+    ref_targets = deque()
 
     def _evaluate_ref(target):
-        cls = get_referenced_class(target)
-        if target not in schema['$defs']:
-            schema['$defs'][target] = None  # to stop recursion
-            schema['$defs'][target] = _spec_to_schema(
-                cls.spec
-            )
+        cls = available_classes[target]
+        if target not in defs:
+            def resolve_ref():
+                defs[target] = None  # to stop recursion
+                defs[target] = _spec_to_schema(cls.spec)
+            ref_targets.append(resolve_ref)
         return f'#/$defs/{target}'
 
     def _spec_to_schema(spec):
@@ -196,13 +206,17 @@ def spec_to_schema(spec):
                     result[key] = _evaluate_ref(value)
                 else:
                     result[key] = _spec_to_schema(value)
-            return result
-        if isinstance(spec, list):
-            return [
-                _spec_to_schema(elem) for elem in spec
-            ]
-        return spec
+        elif isinstance(spec, list):
+            result = [_spec_to_schema(elem) for elem in spec]
+        else:
+            result = spec
+        return result
+
     result = _spec_to_schema(spec)
+    while ref_targets:
+        ref_targets.popleft()()
+    if defs:
+        schema['$defs'] = dict(reversed(defs.items()))
     schema.update(result)
     return schema
 
@@ -250,12 +264,12 @@ class Number(ParsedObject):
 class Regex(ParsedObject):
     spec = {
         'type': 'object',
-        'properties': {'$regex': {'$ref': 'String'}},
-        'required': ['$regex']
+        'properties': {'$re': {'$ref': 'String'}},
+        'required': ['$re']
     }
 
     def render(self, current):
-        return self.value['$regex'].render(current)
+        return self.value['$re'].render(current)
 
 
 class DataList(ParsedObject):
@@ -361,7 +375,7 @@ class All(ParsedObject):
         "type": "object",
         "properties": {
             "$all": {"anyOf": [
-                {"$ref": "Query"},
+                {"$ref": "Verb"},
                 {"$ref": "DataList"}
             ]}
         },
@@ -380,7 +394,7 @@ class Any(ParsedObject):
         "type": "object",
         "properties": {
             "$any": {"anyOf": [
-                {"$ref": "Query"},
+                {"$ref": "Verb"},
                 {"$ref": "DataList"}
             ]}
         },
@@ -414,7 +428,7 @@ class Length(ParsedObject):
     spec = {
         "type": "object",
         "properties": {
-            "$length": {"$ref": "Query"}
+            "$length": {"$ref": "Verb"}
         },
         "required": ["$length"],
         "additionalProperties": False
@@ -442,15 +456,10 @@ class DefaultEq(ParsedObject):
         ]
     }
 
-    def test(self, data):
-        if isinstance(data, dict):
-            return False
-        if isinstance(data, Iterable):
-            return self.value.value in data
-        return self.value.value == data
-
     def render(self, current):
-        return current.test(self.test)
+        if isinstance(self.value, Regex):
+            return current.search(self.value.render(current))
+        return current == self.value.render(current)
 
 
 class Eq(ParsedObject):
@@ -541,7 +550,7 @@ class Values(ParsedObject):
     spec = {
         "type": "object",
         "properties": {
-            "$values": {"$ref": "Query"}
+            "$values": {"$ref": "Verb"}
         },
         "required": ["$values"],
         "additionalProperties": False
@@ -568,7 +577,7 @@ class Keys(ParsedObject):
     spec = {
         "type": "object",
         "properties": {
-            "$keys": {"$ref": "Query"}
+            "$keys": {"$ref": "Verb"}
         },
         "required": ["$keys"],
         "additionalProperties": False
@@ -593,7 +602,7 @@ class Wrap(ParsedObject):
     spec = {
         "type": "object",
         "properties": {
-            "$wrap": {"$ref": "Query"}
+            "$wrap": {"$ref": "Verb"}
         },
         "required": ["$wrap"],
         "additionalProperties": False
@@ -612,7 +621,7 @@ class And(ParsedObject):
         "properties": {
             "$and": {
                 "type": "array",
-                "items": {"$ref": "Query"},
+                "items": {"$ref": "Verb"},
                 "additionalItems": False
             }
         },
@@ -634,7 +643,7 @@ class Or(ParsedObject):
         "properties": {
             "$or": {
                 "type": "array",
-                "items": {"$ref": "Query"},
+                "items": {"$ref": "Verb"},
                 "additionalItems": False
             }
         },
@@ -654,7 +663,7 @@ class Not(ParsedObject):
     spec = {
         "type": "object",
         "properties": {
-            "$not": {"$ref": "Query"}
+            "$not": {"$ref": "Verb"}
         },
         "required": ["$not"],
         "additionalProperties": False
@@ -688,7 +697,8 @@ class Verb(ParsedObject):
             {"$ref": "And"},
             {"$ref": "Or"},
             {"$ref": "Not"},
-            {"$ref": "Wrap"}
+            {"$ref": "Wrap"},
+            {"$ref": "Field"}
         ]
     }
     def render(self, current):
@@ -722,18 +732,78 @@ class Field(ParsedObject):
         return functools.reduce(operator.and_, queries)
 
 
-class Query(ParsedObject):
-    spec = {"$ref": "Field"}
+class TopLevelAnd(And):
+    spec = {
+        "type": "object",
+        "properties": {
+            "$and": {
+                "type": "array",
+                "items": {"$ref": "TopLevel"},
+                "additionalItems": False
+            }
+        },
+        "required": ["$and"],
+        "additionalProperties": False
+    }
 
-    def __init__(self, data):
-        schema = spec_to_schema({"$ref": self.__class__.__name__})
-        jsonschema.validators.validator_for(schema)(
-            schema
-        ).validate(data)
-        super().__init__(data)
+
+class TopLevelOr(Or):
+    spec = {
+        "type": "object",
+        "properties": {
+            "$or": {
+                "type": "array",
+                "items": {"$ref": "TopLevel"},
+                "additionalItems": False
+            }
+        },
+        "required": ["$or"],
+        "additionalProperties": False
+    }
+
+class TopLevelNot(Not):
+    spec = {
+        "type": "object",
+        "properties": {
+            "$not": {
+                "type": "array",
+                "items": {"$ref": "TopLevel"},
+                "additionalItems": False
+            }
+        },
+        "required": ["$not"],
+        "additionalProperties": False
+    }
+
+
+class TopLevel(ParsedObject):
+    spec = {"anyOf": [
+        {"$ref": "Fragment"},
+        {"$ref": "TopLevelAnd"},
+        {"$ref": "TopLevelOr"},
+        {"$ref": "TopLevelNot"},
+        {"$ref": "Values"},
+        {"$ref": "Keys"},
+        {"$ref": "Field"}
+    ]}
 
     def render(self, current):
         return self.value.render(current)
 
-    def as_tinydb_query(self):
-        return self.render(tinydb.Query())
+
+def Schema(target=TopLevel):
+    return spec_to_schema({"$ref": target.__name__})
+
+
+def Query(query):
+    entry_point = TopLevel
+    schema = Schema(entry_point)
+    try:
+        jsonschema.validators.validator_for(schema)(
+            schema
+        ).validate(query)
+    except jsonschema.exceptions.SchemaError as exc:
+        raise LoadError(str(exc)) from exc
+    except jsonschema.exceptions.ValidationError as exc:
+        raise QLSyntaxError(str(exc)) from exc
+    return entry_point(query).render(tinydb.Query())

@@ -1,1 +1,1 @@
-from .tinydb_ql import Query
+from .tinydb_ql import Schema, Query, LoadError, QLSyntaxError

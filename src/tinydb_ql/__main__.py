@@ -6,19 +6,22 @@ import random
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
+import contextlib
 
 import tinydb
 
-from .tinydb_ql import Query
+from .tinydb_ql import Query, Schema
 
 
+@contextlib.contextmanager
 def load_data(dbpath):
     if str(dbpath) == '-':
         db = tinydb.TinyDB(storage=tinydb.storages.MemoryStorage)
         db.storage.write(json.load(sys.stdin))
     else:
         db = tinydb.TinyDB(dbpath, access_mode='r')
-    return db
+    yield db
+    db.close()
 
 
 def parse_args(argv):
@@ -33,7 +36,11 @@ def parse_args(argv):
         help='input db (default: "-" read from stdin)'
     )
     parser.add_argument(
-        'query', help='DB query'
+        'query', nargs='?', default='{}', help='DB query'
+    )
+    parser.add_argument(
+        '--schema', action='store_true',
+        help='show a query-language jsonschema'
     )
     parser.add_argument(
         '--max-depth', type=int,
@@ -64,9 +71,15 @@ def parse_args(argv):
 
 def main():
     args = parse_args(sys.argv[1:])
-    db = load_data(args.db_path)
-    query = Query(json.loads(args.query)).as_tinydb_query()
-    result = db.search(query)
+    if args.schema:
+        if args.json:
+            json.dump(Schema(), sys.stdout, indent=4)
+            print()
+        else:
+            pprint.pp(Schema())
+        return
+    with load_data(args.db_path) as db:
+        result = db.search(Query(json.loads(args.query)))
     result_count = len(result)
     if len(result) > 1 or args.max_depth_specified:
         pp_options = {
@@ -88,3 +101,7 @@ def main():
     else:
         pprint.pp(result, **pp_options)
     print(summary_txt, file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()
