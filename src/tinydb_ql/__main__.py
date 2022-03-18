@@ -87,7 +87,8 @@ def main():
         }
     else:
         pp_options = {}
-    summary_txt = f'{result_count} documents found.'
+    plural = '' if result_count == 1 else 's'
+    summary_txt = f'{result_count} document{plural} found.'
     if args.sample is not None:
         sample_count = min(result_count, args.sample)
         result = random.sample(result, sample_count)

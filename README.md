@@ -17,7 +17,7 @@ A commandline tool to query a TinyDB database
 ```sh
 $ tinydb-query db.json '{"name": {"$re": ".*n$"}, "age": {"$lt": 30}}'
 [{'name': 'John', 'age': 22}]
-1 documents found.
+1 document found.
 ```
 
 ## Commandline help
