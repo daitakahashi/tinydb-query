@@ -8,6 +8,7 @@ from collections import deque
 import jsonschema
 import tinydb
 
+# pylint: disable = too-few-public-methods
 
 class LoadError(TypeError):
     pass
@@ -78,6 +79,7 @@ class LoadRef:
 
 
 class LoadData:
+    # pylint: disable = too-many-instance-attributes
     def __init__(self, spec):
         self.spec = spec
         if 'type' in spec:
@@ -224,6 +226,7 @@ def spec_to_schema(spec):
 class ParsedObject:
     spec = {}
     loader = None
+    schema = None
 
     def __init__(self, data):
         if self.__class__.loader is None:
@@ -233,29 +236,42 @@ class ParsedObject:
 
     @classmethod
     def get_schema(cls):
-        return spec_to_schema({'$ref': cls.__name__})
+        if cls.schema is None:
+            try:
+                cls.schema = spec_to_schema({'$ref': cls.__name__})
+            except KeyError as exc:
+                raise LoadError(str(exc)) from exc
+        return cls.schema
 
-    @staticmethod
-    def render(_current):
-        raise NotImplementedError()
+    def render(self, current):
+        return self.value.render(current)
 
 
 class String(ParsedObject):
-    spec = {'type': 'string'}
+    spec = {
+        "$comment": "simple datatype: string",
+        "type": "string"
+    }
 
     def render(self, _):
         return self.value
 
 
 class Boolean(ParsedObject):
-    spec = {'type': 'boolean'}
+    spec = {
+        "$comment": "simple datatype: boolean",
+        "type": "boolean"
+    }
 
     def render(self, _):
         return self.value
 
 
 class Number(ParsedObject):
-    spec = {'type': 'number'}
+    spec = {
+        "$comment": "simple datatype: number",
+        "type": "number"
+    }
 
     def render(self, _):
         return self.value
@@ -263,17 +279,21 @@ class Number(ParsedObject):
 
 class Regex(ParsedObject):
     spec = {
-        'type': 'object',
-        'properties': {'$re': {'$ref': 'String'}},
-        'required': ['$re']
+        "$comment": "$re: regular expression",
+        "type": "object",
+        "properties": {"$re": {"$ref": "String"}},
+        "required": ["$re"]
     }
 
     def render(self, current):
-        return self.value['$re'].render(current)
+        return self.value["$re"].render(current)
 
 
 class DataList(ParsedObject):
-    spec = {'type': 'array'}
+    spec = {
+        "$comment": "symple container: list",
+        "type": "array"
+    }
 
     def render(self, _):
         return self.value
@@ -281,25 +301,28 @@ class DataList(ParsedObject):
 
 class Exists(ParsedObject):
     spec = {
-        'type': 'object',
-        'properties': {'$exists': {'$ref': 'Boolean'}},
-        'required': ['$exists'],
-        'additionalProperties': False
+        "$comment": "$exists: matches any document with the field; query.exists()",
+        "type": "object",
+        "properties": {"$exists": {"$ref": "Boolean"}},
+        "required": ["$exists"],
+        "additionalProperties": False
     }
 
     def render(self, current):
-        if self.value['$exists'].value:
+        if self.value["$exists"].value:
             return current.exists()
         return ~current.exists()
 
 
 class Matches(ParsedObject):
     spec = {
+        "$comment": "$matches: match any document with the whole field "
+        "matching the regexp; query.matches(arg)",
         "type": "object",
         "properties": {
             "$matches": {"anyOf": [
-                {'$ref': 'Regex'},
-                {'$ref': 'String'}
+                {"$ref": "Regex"},
+                {"$ref": "String"}
             ]}
         },
         "required": ["$matches"],
@@ -308,17 +331,19 @@ class Matches(ParsedObject):
 
     def render(self, current):
         return current.matches(
-            self.value['$matches'].render(current)
+            self.value["$matches"].render(current)
         )
 
 
 class Search(ParsedObject):
     spec = {
+        "$comment": "$search: match any document with a substring of the field "
+        "matching the regexp; query.search(arg)",
         "type": "object",
         "properties": {
             "$search": {"anyOf": [
-                {'$ref': 'Regex'},
-                {'$ref': 'String'}
+                {"$ref": "Regex"},
+                {"$ref": "String"}
             ]}
         },
         "required": ["$search"],
@@ -327,12 +352,13 @@ class Search(ParsedObject):
 
     def render(self, current):
         return current.search(
-            self.value['$search'].render(current)
+            self.value["$search"].render(current)
         )
 
 
 class Fragment(ParsedObject):
     spec = {
+        "$comment": "$fragment: match with a document fragment; query.fragment({...})",
         "type": "object",
         "properties": {
             "$fragment": {
@@ -344,11 +370,12 @@ class Fragment(ParsedObject):
     }
 
     def render(self, current):
-        return current.fragment(self.value['$fragment'])
+        return current.fragment(self.value["$fragment"])
 
 
 class Types(ParsedObject):
     spec = {
+        "$comment": "$types: match by the document's datatype; no tinydb correspondence",
         "type": "object",
         "properties": {
             "$types": {
@@ -365,105 +392,82 @@ class Types(ParsedObject):
 
     def render(self, current):
         allowed_types = tuple(
-            typename2datatype[name] for name in self.value['$types']
+            typename2datatype[name] for name in self.value["$types"]
         )
         return current.test(lambda x: isinstance(x, allowed_types))
 
 
-class All(ParsedObject):
+class Enum(ParsedObject):
     spec = {
+        "$comment": "$enum: match if the field is contained in the list; "
+        "query.one_of([...])",
         "type": "object",
         "properties": {
-            "$all": {"anyOf": [
-                {"$ref": "Verb"},
-                {"$ref": "DataList"}
-            ]}
+            "$enum": {"$ref": "DataList"}
         },
-        "required": ["$all"],
-        "additionalProperties": False
-    }
-
-    def render(self, current):
-        return current.all(
-            self.value['$all'].render(tinydb.Query())
-        )
-
-
-class Any(ParsedObject):
-    spec = {
-        "type": "object",
-        "properties": {
-            "$any": {"anyOf": [
-                {"$ref": "Verb"},
-                {"$ref": "DataList"}
-            ]}
-        },
-        "required": ["$any"],
-        "additionalProperties": False
-    }
-
-    def render(self, current):
-        return current.any(
-            self.value['$any'].render(tinydb.Query())
-        )
-
-
-class OneOf(ParsedObject):
-    spec = {
-        "type": "object",
-        "properties": {
-            "$oneOf": {"$ref": "DataList"}
-        },
-        "required": ["$oneOf"],
+        "required": ["$enum"],
         "additionalProperties": False
     }
 
     def render(self, current):
         return current.one_of(
-            self.value['$oneOf'].render(current)
+            self.value["$enum"].render(current)
         )
 
 
 class Length(ParsedObject):
     spec = {
+        "$comment": "$length: match if the length of the document satisfies condition; "
+        "no tinydb correspondence",
         "type": "object",
         "properties": {
-            "$length": {"$ref": "Verb"}
+            "$length": {"anyOf": [
+                {"$ref": "Verb"},
+                {"$ref": "DefaultEq"}
+            ]}
         },
         "required": ["$length"],
         "additionalProperties": False
     }
 
     def render(self, current):
-        following_query = self.value['$length'].render(
-            tinydb.Query().map(ident)
+        following_query = self.value["$length"].render(
+            tinydb.Query().map(len)
         )
         return current.test(
             lambda data: (
-                isinstance(data, Sized)
-                and following_query(len(data))
+                isinstance(data, Sized) and following_query(data)
             )
         )
 
 
 class DefaultEq(ParsedObject):
     spec = {
+        "$comment": "implicit == comparison for a literal atom",
         "anyOf": [
             {"$ref": "Number"},
             {"$ref": "Boolean"},
-            {"$ref": "String"},
-            {"$ref": "Regex"}
+            {"$ref": "String"}
         ]
     }
 
     def render(self, current):
-        if isinstance(self.value, Regex):
-            return current.search(self.value.render(current))
         return current == self.value.render(current)
+
+
+class DefaultSearch(ParsedObject):
+    spec = {
+        "$comment": "implicit query.search() for regexp",
+        "$ref": "Regex"
+    }
+
+    def render(self, current):
+        return current.search(self.value.render(current))
 
 
 class Eq(ParsedObject):
     spec = {
+        "$comment": "match if the document is equal to the given value; ==",
         "type": "object",
         "properties": {
             "$eq": {}
@@ -473,11 +477,12 @@ class Eq(ParsedObject):
     }
 
     def render(self, current):
-        return current == self.value['$eq']
+        return current == self.value["$eq"]
 
 
 class Ne(ParsedObject):
     spec = {
+        "$comment": "match if the document exists and is unequal to the given value; !=",
         "type": "object",
         "properties": {
             "$ne": {}
@@ -487,11 +492,12 @@ class Ne(ParsedObject):
     }
 
     def render(self, current):
-        return current != self.value['$ne']
+        return current != self.value["$ne"]
 
 
 class Lt(ParsedObject):
     spec = {
+        "$comment": "match if the document is less than the given value; <",
         "type": "object",
         "properties": {
             "$lt": {}
@@ -501,11 +507,12 @@ class Lt(ParsedObject):
     }
 
     def render(self, current):
-        return current < self.value['$lt']
+        return current < self.value["$lt"]
 
 
 class Le(ParsedObject):
     spec = {
+        "$comment": "match if the document is less or equal to than the given value; <=",
         "type": "object",
         "properties": {
             "$le": {}
@@ -515,11 +522,12 @@ class Le(ParsedObject):
     }
 
     def render(self, current):
-        return current <= self.value['$le']
+        return current <= self.value["$le"]
 
 
 class Gt(ParsedObject):
     spec = {
+        "$comment": "match if the document is greater than the given value; >",
         "type": "object",
         "properties": {
             "$gt": {}
@@ -529,11 +537,12 @@ class Gt(ParsedObject):
     }
 
     def render(self, current):
-        return current > self.value['$gt']
+        return current > self.value["$gt"]
 
 
 class Ge(ParsedObject):
     spec = {
+        "$comment": "match if the document is greater than or equal to the given value; >=",
         "type": "object",
         "properties": {
             "$ge": {}
@@ -543,76 +552,21 @@ class Ge(ParsedObject):
     }
 
     def render(self, current):
-        return current >= self.value['$ge']
+        return current >= self.value["$ge"]
 
 
-class Values(ParsedObject):
+class Compare(ParsedObject):
     spec = {
-        "type": "object",
-        "properties": {
-            "$values": {"$ref": "Verb"}
-        },
-        "required": ["$values"],
-        "additionalProperties": False
+        "$comment": "comparison operators",
+        "anyOf": [
+            {"$ref": "Eq"},
+            {"$ref": "Ne"},
+            {"$ref": "Lt"},
+            {"$ref": "Le"},
+            {"$ref": "Gt"},
+            {"$ref": "Ge"}
+        ]
     }
-
-    @classmethod
-    def flatten(cls, data):
-        if isinstance(data, list):
-            for elem in data:
-                yield from cls.flatten(elem)
-        elif isinstance(data, dict):
-            for elem in data.values():
-                yield from cls.flatten(elem)
-        else:
-            yield data
-
-    def render(self, current):
-        return self.value['$values'].render(
-            current.map(self.flatten)
-        )
-
-
-class Keys(ParsedObject):
-    spec = {
-        "type": "object",
-        "properties": {
-            "$keys": {"$ref": "Verb"}
-        },
-        "required": ["$keys"],
-        "additionalProperties": False
-    }
-
-    @classmethod
-    def flatten(cls, data):
-        if isinstance(data, dict):
-            for key, value in data.items():
-                yield key
-                yield from cls.flatten(value)
-        else:
-            return
-
-    def render(self, current):
-        return self.value['$keys'].render(
-            current.map(self.flatten)
-        )
-
-
-class Wrap(ParsedObject):
-    spec = {
-        "type": "object",
-        "properties": {
-            "$wrap": {"$ref": "Verb"}
-        },
-        "required": ["$wrap"],
-        "additionalProperties": False
-    }
-
-    def render(self, current):
-        return self.value['$wrap'].render(
-            # insert a trivial mapping
-            current.map(ident)
-        )
 
 
 class And(ParsedObject):
@@ -621,7 +575,11 @@ class And(ParsedObject):
         "properties": {
             "$and": {
                 "type": "array",
-                "items": {"$ref": "Verb"},
+                "items": {"anyOf": [
+                    {"$ref": "Verb"},
+                    {"$ref": "DefaultEq"},
+                    {"$ref": "DefaultSearch"}
+                ]},
                 "additionalItems": False
             }
         },
@@ -630,9 +588,11 @@ class And(ParsedObject):
     }
 
     def render(self, current):
+        if not self.value["$and"]:
+            return current.noop()
         return functools.reduce(
             operator.and_, (
-                elem.render(current) for elem in self.value['$and']
+                elem.render(current) for elem in self.value["$and"]
             )
         )
 
@@ -643,7 +603,11 @@ class Or(ParsedObject):
         "properties": {
             "$or": {
                 "type": "array",
-                "items": {"$ref": "Verb"},
+                "items": {"anyOf": [
+                    {"$ref": "Verb"},
+                    {"$ref": "DefaultEq"},
+                    {"$ref": "DefaultSearch"}
+                ]},
                 "additionalItems": False
             }
         },
@@ -652,9 +616,11 @@ class Or(ParsedObject):
     }
 
     def render(self, current):
+        if not self.value["$or"]:
+            return ~current.noop()
         return functools.reduce(
             operator.or_, (
-                elem.render(current) for elem in self.value['$or']
+                elem.render(current) for elem in self.value["$or"]
             )
         )
 
@@ -663,14 +629,74 @@ class Not(ParsedObject):
     spec = {
         "type": "object",
         "properties": {
-            "$not": {"$ref": "Verb"}
+            "$not": {"anyOf": [
+                    {"$ref": "Verb"},
+                    {"$ref": "DefaultEq"},
+                    {"$ref": "DefaultSearch"}
+            ]}
         },
         "required": ["$not"],
         "additionalProperties": False
     }
 
     def render(self, current):
-        return ~self.value['$not'].render(current)
+        return ~self.value["$not"].render(current)
+
+
+class All(ParsedObject):
+    spec = {
+        "$comment": "$all: select if all documents in the list field "
+        "(1) match the query, or (2) are a member of the given list; query.all([...])",
+        "type": "object",
+        "properties": {
+            "$all": {"anyOf": [
+                {"$ref": "Verb"},
+                {"$ref": "DefaultEq"},
+                {"$ref": "DefaultSearch"},
+                {"$ref": "DataList"}
+            ]}
+        },
+        "required": ["$all"],
+        "additionalProperties": False
+    }
+
+    def render(self, current):
+        try:
+            inner = self.value["$all"].render(tinydb.Query())
+        except ValueError:
+            # assign a trivial mapping when the path is empty;
+            # allowing {"a": {"$all": {"$gt": 12}}} to match an array of which
+            # all elements are greater than 12.
+            inner = self.value["$all"].render(tinydb.Query().map(ident))
+        return current.all(inner)
+
+
+class Any(ParsedObject):
+    spec = {
+        "$comment": "$any: select if at least one document in the list field "
+        "(1) match the query, or (2) are a member of the given list; query.any([...])",
+        "type": "object",
+        "properties": {
+            "$any": {"anyOf": [
+                {"$ref": "Verb"},
+                {"$ref": "DefaultEq"},
+                {"$ref": "DefaultSearch"},
+                {"$ref": "DataList"}
+            ]}
+        },
+        "required": ["$any"],
+        "additionalProperties": False
+    }
+
+    def render(self, current):
+        try:
+            inner = self.value["$any"].render(tinydb.Query())
+        except ValueError:
+            # assign a trivial mapping when the path is empty;
+            # allowing {"a": {"$any": {"$gt": 12}}} to match an array of which
+            # at least one element is greater than 12.
+            inner = self.value["$any"].render(tinydb.Query().map(ident))
+        return current.any(inner)
 
 
 class Verb(ParsedObject):
@@ -684,25 +710,14 @@ class Verb(ParsedObject):
             {"$ref": "Any"},
             {"$ref": "All"},
             {"$ref": "Length"},
-            {"$ref": "OneOf"},
-            {"$ref": "DefaultEq"},
-            {"$ref": "Eq"},
-            {"$ref": "Ne"},
-            {"$ref": "Lt"},
-            {"$ref": "Le"},
-            {"$ref": "Gt"},
-            {"$ref": "Ge"},
-            {"$ref": "Values"},
-            {"$ref": "Keys"},
+            {"$ref": "Enum"},
+            {"$ref": "Compare"},
             {"$ref": "And"},
             {"$ref": "Or"},
             {"$ref": "Not"},
-            {"$ref": "Wrap"},
             {"$ref": "Field"}
         ]
     }
-    def render(self, current):
-        return self.value.render(current)
 
 
 class Field(ParsedObject):
@@ -710,7 +725,11 @@ class Field(ParsedObject):
         "type": "object",
         "patternProperties": {
             "(^[^$.\\s\\d][^$.\\s]*(\\.[^$.\\s\\d][^$.\\s]*)*$)": {
-                "$ref": "Verb"
+                "anyOf": [
+                    {"$ref": "Verb"},
+                    {"$ref": "DefaultEq"},
+                    {"$ref": "DefaultSearch"}
+                ]
             }
         },
         "additionalProperties": False
@@ -723,7 +742,7 @@ class Field(ParsedObject):
 
         for key, value in self.value.items():
             query = current
-            fields = key.split('.')
+            fields = key.split(".")
             for field in fields:
                 query = getattr(query, field)
             queries.append(value.render(query))
@@ -765,11 +784,7 @@ class TopLevelNot(Not):
     spec = {
         "type": "object",
         "properties": {
-            "$not": {
-                "type": "array",
-                "items": {"$ref": "TopLevel"},
-                "additionalItems": False
-            }
+            "$not": {"$ref": "TopLevel"}
         },
         "required": ["$not"],
         "additionalProperties": False
@@ -782,17 +797,12 @@ class TopLevel(ParsedObject):
         {"$ref": "TopLevelAnd"},
         {"$ref": "TopLevelOr"},
         {"$ref": "TopLevelNot"},
-        {"$ref": "Values"},
-        {"$ref": "Keys"},
         {"$ref": "Field"}
     ]}
 
-    def render(self, current):
-        return self.value.render(current)
-
 
 def Schema(target=TopLevel):
-    return spec_to_schema({"$ref": target.__name__})
+    return target.get_schema()
 
 
 def Query(query):

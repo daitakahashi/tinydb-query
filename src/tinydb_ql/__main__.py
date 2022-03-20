@@ -10,18 +10,13 @@ import contextlib
 
 import tinydb
 
-from .tinydb_ql import Query, Schema
+from .tinydb_ql import Query, Schema, QLSyntaxError
 
 
 @contextlib.contextmanager
 def load_data(dbpath):
-    if str(dbpath) == '-':
-        db = tinydb.TinyDB(storage=tinydb.storages.MemoryStorage)
-        db.storage.write(json.load(sys.stdin))
-    else:
-        db = tinydb.TinyDB(dbpath, access_mode='r')
-    yield db
-    db.close()
+    with tinydb.TinyDB(dbpath, access_mode='r') as db:
+        yield db
 
 
 def parse_args(argv):
@@ -32,8 +27,7 @@ def parse_args(argv):
 
     parser = ArgumentParser()
     parser.add_argument(
-        'db_path', nargs='?', default='-', type=Path,
-        help='input db (default: "-" read from stdin)'
+        'db_path', type=Path, help='input db'
     )
     parser.add_argument(
         'query', nargs='?', default='{}', help='DB query'
@@ -70,7 +64,18 @@ def parse_args(argv):
 
 
 def main():
-    args = parse_args(sys.argv[1:])
+    try:
+        _main(sys.argv)
+    except QLSyntaxError as exc:
+        print('syntax error:', file=sys.stderr)
+        print(str(exc), file=sys.stderr)
+        return -1
+    else:
+        return 0
+
+
+def _main(argv):
+    args = parse_args(argv[1:])
     if args.schema:
         if args.json:
             json.dump(Schema(), sys.stdout, indent=4)
