@@ -15,6 +15,12 @@ from .tinydb_ql import Query, Schema, QLSyntaxError
 
 @contextlib.contextmanager
 def load_data(dbpath):
+    if not isinstance(dbpath, Path):
+        raise RuntimeError('no input file')
+    if not dbpath.exists():
+        raise FileNotFoundError(f'input file does not exist')
+    if not dbpath.is_file():
+        raise IsADirectoryError(f'input path is not a file')
     with tinydb.TinyDB(dbpath, access_mode='r') as db:
         yield db
 
@@ -27,7 +33,7 @@ def parse_args(argv):
 
     parser = ArgumentParser()
     parser.add_argument(
-        'db_path', type=Path, help='input db'
+        'db_path', nargs='?', default=None, type=Path, help='input db'
     )
     parser.add_argument(
         'query', nargs='?', default='{}', help='DB query'
@@ -66,12 +72,15 @@ def parse_args(argv):
 def main():
     try:
         _main(sys.argv)
+        return 0
     except QLSyntaxError as exc:
         print('syntax error:', file=sys.stderr)
         print(str(exc), file=sys.stderr)
-        return -1
-    else:
-        return 0
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+    except IsADirectoryError as exc:
+        print(str(exc), file=sys.stderr)
+    sys.exit(-1)
 
 
 def _main(argv):
