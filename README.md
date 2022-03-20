@@ -24,8 +24,8 @@ $ tinydb-query db.json '{"name": {"$re": ".*n$"}, "age": {"$lt": 30}}'
 
 ```
 positional arguments:
-  db_path               input db (default: "-" read from stdin)
-  query                 DB query
+  db_path               input db
+  query                 DB query (JSON formatted)
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -35,4 +35,42 @@ optional arguments:
   --with-index          display as an indexed dictionary
   --sample N            sample N documents randomly
   --json                output as a JSON text
+```
+
+## Query commands
+
+### Basic query commands
+|       Query         | TinyDB |
+|---------------------|---------|
+| `{"field.name": ...}`<br>`{"field": {"name": ...}}`| `Query().field.name` |
+| `{"$and": [qry, ...]}` | `field.qry & ...` |
+| `{"$or": [qry, ...]}` | `field.qry \| ...` |
+| `{"$not": qry}` | `~field.qry` |
+| `{"$exists": boolean}`| `field.exists()` |
+| `{"$search": regexp}`<br>`{"$re": regexp}` | `field.search(regexp)` |
+| `{"$matches": regexp}`| `field.matches(regexp)` |
+| `{"$fragment": {k:v, ...}}`| `field.fragment({k:v, ...})` |
+| `{"$any": array-or-qry}` | `field.any(array-or-qry)` |
+| `{"$all": array-or-qry}` | `field.all(array-or-qry)` |
+| `{"$enum": [item, ...]}`| `field.one_of([item, ...])` |
+| `{"$eq": value}`,<br>`string`, `number`, `boolean` values| `field == value` |
+| `{"$ne": value}` | `field != value` |
+| `{"$ge": value}`, `{"$gt": value}` | `field >= value`, `field > value` |
+| `{"$le": value}`, `{"$lt": value}` | `field <= value`, `field < value` |
+
+### Extended commands
+|       Query         |         |
+|---------------------|---------|
+| `{"$length": qry}`  | Select a document when the len(field) satisfies `qry` |
+| `{"$types": [type, ...]}`<br>`types`: JSON types| Select a document when the field type is in `[type, ...]` |
+
+## Examples
+```{"address.country": "Japan", "age": 20}```
+```python
+(Query().address.country == "Japan") & (Query().age == 20)
+```
+
+```{"course": {"$all": {"score": {"$gt": 80}}}}```
+```python
+Query().course.all(Query().score > 80)
 ```

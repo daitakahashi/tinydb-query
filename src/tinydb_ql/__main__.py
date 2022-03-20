@@ -18,9 +18,9 @@ def load_data(dbpath):
     if not isinstance(dbpath, Path):
         raise RuntimeError('no input file')
     if not dbpath.exists():
-        raise FileNotFoundError(f'input file does not exist')
+        raise FileNotFoundError('input file does not exist')
     if not dbpath.is_file():
-        raise IsADirectoryError(f'input path is not a file')
+        raise IsADirectoryError('input path is not a file')
     with tinydb.TinyDB(dbpath, access_mode='r') as db:
         yield db
 
@@ -36,7 +36,7 @@ def parse_args(argv):
         'db_path', nargs='?', default=None, type=Path, help='input db'
     )
     parser.add_argument(
-        'query', nargs='?', default='{}', help='DB query'
+        'query', nargs='?', default='{}', help='DB query (JSON formatted)'
     )
     parser.add_argument(
         '--schema', action='store_true',
