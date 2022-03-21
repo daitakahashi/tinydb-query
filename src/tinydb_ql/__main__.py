@@ -9,6 +9,8 @@ from pathlib import Path
 import contextlib
 
 import tinydb
+from tinydb.storages import JSONStorage
+from tinydb.middlewares import CachingMiddleware
 
 from .tinydb_ql import Query, Schema, QLSyntaxError
 
@@ -21,15 +23,17 @@ def load_data(dbpath, table_name):
         raise FileNotFoundError('input file does not exist')
     if not dbpath.is_file():
         raise IsADirectoryError('input path is not a file')
-    with tinydb.TinyDB(dbpath, access_mode='r') as db:
-        available_tables = db.tables()
+    with tinydb.TinyDB(
+            dbpath, access_mode='r', storage=CachingMiddleware(JSONStorage)
+    ) as db:
         if table_name is None:
-            table_name = db.default_table_name
-            yield db.table(table_name), table_name
-        elif table_name in available_tables:
-            yield db.table(table_name), table_name
+            yield db, 'default table'
         else:
-            raise RuntimeError(f'available tables: {available_tables}')
+            available_tables = db.tables()
+            if table_name in available_tables:
+                yield db.table(table_name), f'table {table_name}'
+            else:
+                raise RuntimeError(f'available tables: {available_tables}')
 
 
 def parse_args(argv):
@@ -100,9 +104,9 @@ def _main(argv):
         else:
             pprint.pp(Schema())
         return
-    with load_data(args.db_path, args.table) as (db, table):
-        table_name = table
-        result = db.search(Query(json.loads(args.query)))
+    with load_data(args.db_path, args.table) as (db, table_msg):
+        query = Query(json.loads(args.query))
+        result = db.search(query)
     result_count = len(result)
     if len(result) > 1 or args.max_depth_specified:
         pp_options = {
@@ -111,7 +115,7 @@ def _main(argv):
     else:
         pp_options = {}
     plural = '' if result_count == 1 else 's'
-    summary_txt = f'found {result_count} document{plural} on the {table_name}'
+    summary_txt = f'found {result_count} document{plural} on the {table_msg}'
     if args.sample is not None:
         sample_count = min(result_count, args.sample)
         result = sorted(random.sample(result, sample_count), key=lambda x: x.doc_id)
