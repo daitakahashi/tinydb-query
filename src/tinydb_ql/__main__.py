@@ -14,7 +14,7 @@ from .tinydb_ql import Query, Schema, QLSyntaxError
 
 
 @contextlib.contextmanager
-def load_data(dbpath):
+def load_data(dbpath, table_name):
     if not isinstance(dbpath, Path):
         raise RuntimeError('no input file')
     if not dbpath.exists():
@@ -22,7 +22,14 @@ def load_data(dbpath):
     if not dbpath.is_file():
         raise IsADirectoryError('input path is not a file')
     with tinydb.TinyDB(dbpath, access_mode='r') as db:
-        yield db
+        available_tables = db.tables()
+        if table_name is None:
+            table_name = db.default_table_name
+            yield db.table(table_name), table_name
+        elif table_name in available_tables:
+            yield db.table(table_name), table_name
+        else:
+            raise RuntimeError(f'available tables: {available_tables}')
 
 
 def parse_args(argv):
@@ -41,6 +48,9 @@ def parse_args(argv):
     parser.add_argument(
         '--schema', action='store_true',
         help='show a query-language jsonschema'
+    )
+    parser.add_argument(
+        '--table', help='target table (default: the default table)'
     )
     parser.add_argument(
         '--max-depth', type=int,
@@ -76,9 +86,7 @@ def main():
     except QLSyntaxError as exc:
         print('syntax error:', file=sys.stderr)
         print(str(exc), file=sys.stderr)
-    except FileNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-    except IsADirectoryError as exc:
+    except (FileNotFoundError, IsADirectoryError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
     sys.exit(-1)
 
@@ -92,7 +100,8 @@ def _main(argv):
         else:
             pprint.pp(Schema())
         return
-    with load_data(args.db_path) as db:
+    with load_data(args.db_path, args.table) as (db, table):
+        table_name = table
         result = db.search(Query(json.loads(args.query)))
     result_count = len(result)
     if len(result) > 1 or args.max_depth_specified:
@@ -102,11 +111,13 @@ def _main(argv):
     else:
         pp_options = {}
     plural = '' if result_count == 1 else 's'
-    summary_txt = f'{result_count} document{plural} found.'
+    summary_txt = f'{result_count} document{plural} found on the {table_name}'
     if args.sample is not None:
         sample_count = min(result_count, args.sample)
         result = random.sample(result, sample_count)
-        summary_txt = f'{result_count} documents found ({sample_count} sampled).'
+        summary_txt += f' ({sample_count} sampled).'
+    else:
+        summary_txt += '.'
     if args.with_index:
         result = dict(enumerate(result, 1))
     if args.json:
