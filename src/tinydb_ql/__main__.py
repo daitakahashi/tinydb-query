@@ -111,15 +111,15 @@ def _main(argv):
     else:
         pp_options = {}
     plural = '' if result_count == 1 else 's'
-    summary_txt = f'{result_count} document{plural} found on the {table_name}'
+    summary_txt = f'found {result_count} document{plural} on the {table_name}'
     if args.sample is not None:
         sample_count = min(result_count, args.sample)
-        result = random.sample(result, sample_count)
+        result = sorted(random.sample(result, sample_count), key=lambda x: x.doc_id)
         summary_txt += f' ({sample_count} sampled).'
     else:
         summary_txt += '.'
     if args.with_index:
-        result = dict(enumerate(result, 1))
+        result = {doc.doc_id: doc for doc in result}
     if args.json:
         if isinstance(result, dict):
             result = {str(key): value for key, value in result.items()}

@@ -23,6 +23,10 @@ $ tinydb-query db.json '{"name": {"$re": ".*n$"}, "age": {"$lt": 30}}'
 ## Commandline help
 
 ```
+usage: tinydb-query [-h] [--schema] [--table TABLE] [--max-depth MAX_DEPTH] [--with-index]
+                    [--sample N] [--json]
+                    [db_path] [query]
+
 positional arguments:
   db_path               input db
   query                 DB query (JSON formatted)
@@ -30,6 +34,7 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   --schema              show a query-language jsonschema
+  --table TABLE         target table (default: the default table)
   --max-depth MAX_DEPTH
                         maximum depth to show (a value <= 0 means unlimited)
   --with-index          display as an indexed dictionary
