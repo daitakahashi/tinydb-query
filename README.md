@@ -23,9 +23,11 @@ $ tinydb-query db.json '{"name": {"$re": ".*n$"}, "age": {"$lt": 30}}'
 ## Commandline help
 
 ```
-usage: tinydb-query [-h] [--schema] [--table TABLE] [--max-depth MAX_DEPTH] [--with-index]
-                    [--sample N] [--json]
+usage: tinydb-query [-h] [--schema] [--table TABLE] [--max-depth MAX_DEPTH]
+                    [--with-index] [--sample N] [--json]
                     [db_path] [query]
+
+Query documents in a tinydb db.
 
 positional arguments:
   db_path               input db
@@ -69,7 +71,7 @@ optional arguments:
 | `{"$length": qry}`  | Select a document when the len(field) satisfies `qry` |
 | `{"$types": [type, ...]}`<br>`types`: JSON types| Select a document when the field type is in `[type, ...]` |
 
-## Examples
+### Examples
 ```{"address.country": "Japan", "age": 20}```
 ```python
 (Query().address.country == "Japan") & (Query().age == 20)
@@ -78,4 +80,18 @@ optional arguments:
 ```{"course": {"$all": {"score": {"$gt": 80}}}}```
 ```python
 Query().course.all(Query().score > 80)
+```
+
+## Helper tool
+```
+usage: tinydb-dump [-h] output
+
+Read a JSON container from stdin and insert all of its items to a tinydb
+database.
+
+positional arguments:
+  output      output tinydb DB path
+
+optional arguments:
+  -h, --help  show this help message and exit
 ```

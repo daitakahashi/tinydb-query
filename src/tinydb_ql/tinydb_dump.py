@@ -3,7 +3,6 @@
 import json
 import sys
 from argparse import ArgumentParser
-from distutils.version import LooseVersion
 from pathlib import Path
 
 import tinydb
@@ -12,7 +11,10 @@ from tinydb.storages import JSONStorage
 
 
 def parse_args(argv):
-    parser = ArgumentParser()
+    parser = ArgumentParser(
+        description='Read a JSON container from stdin and '
+        'insert all of its items to a tinydb database.'
+    )
     parser.add_argument(
         'output', type=Path, help='output tinydb DB path'
     )

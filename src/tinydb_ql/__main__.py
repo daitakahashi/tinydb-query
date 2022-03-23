@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 
+import contextlib
 import json
 import pprint
 import random
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
-import contextlib
 
 import tinydb
-from tinydb.storages import JSONStorage
 from tinydb.middlewares import CachingMiddleware
+from tinydb.storages import JSONStorage
 
-from .tinydb_ql import Query, Schema, QLSyntaxError
+from .tinydb_ql import QLSyntaxError, Query, Schema
 
 
 @contextlib.contextmanager
@@ -42,7 +42,7 @@ def parse_args(argv):
             return None
         return int(x)
 
-    parser = ArgumentParser()
+    parser = ArgumentParser(description='Query documents in a tinydb db.')
     parser.add_argument(
         'db_path', nargs='?', default=None, type=Path, help='input db'
     )
