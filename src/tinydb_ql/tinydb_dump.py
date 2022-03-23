@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 
-from argparse import ArgumentParser
-from pathlib import Path
 import json
 import sys
+from argparse import ArgumentParser
+from distutils.version import LooseVersion
+from pathlib import Path
 
 import tinydb
-from tinydb.storages import JSONStorage
 from tinydb.middlewares import CachingMiddleware
+from tinydb.storages import JSONStorage
+
 
 def parse_args(argv):
     parser = ArgumentParser()
     parser.add_argument(
-        'output', type=Path,
-        help='output tinydb DB path'
+        'output', type=Path, help='output tinydb DB path'
     )
     args = parser.parse_args(argv)
     return args
@@ -24,21 +25,23 @@ def insert_from_array(db, array_input):
 
 
 def insert_from_object(db, object_input):
-    tables = db.storage.read()
-    if tables is None:
-        tables = {}
     table_name = db.default_table_name
-    raw_table = {
-        str(key): value
-        for key, value in tables.get(table_name, {})
+    id_class = db.table(table_name).document_id_class
+    content = db.storage.read()
+    if content is None:
+        content = {}
+    table = content.get(table_name, {})
+    existing = {
+        str(id_class(key)): doc
+        for key, doc in table.items()
     }
     documents = {
-        str(int(key)): value
+        str(id_class(key)): value
         for key, value in object_input.items()
     }
-    raw_table.update(documents)
-    tables[table_name] = raw_table
-    db.storage.write(tables)
+    existing.update(documents)
+    content[table_name] = existing
+    db.storage.write(content)
     db.table(table_name).clear_cache()
 
 
