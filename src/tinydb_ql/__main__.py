@@ -88,8 +88,7 @@ def main():
         _main(sys.argv)
         return 0
     except QLSyntaxError as exc:
-        print('syntax error:', file=sys.stderr)
-        print(str(exc), file=sys.stderr)
+        print(f'Query-syntax error: {str(exc)}', file=sys.stderr)
     except (FileNotFoundError, IsADirectoryError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
     sys.exit(-1)
@@ -105,7 +104,10 @@ def _main(argv):
             pprint.pp(Schema())
         return
     with load_data(args.db_path, args.table) as (db, table_msg):
-        query = Query(json.loads(args.query))
+        try:
+            query = Query(json.loads(args.query))
+        except json.decoder.JSONDecodeError as exc:
+            raise QLSyntaxError(str(exc)) from exc
         result = db.search(query)
     result_count = len(result)
     if len(result) > 1 or args.max_depth_specified:

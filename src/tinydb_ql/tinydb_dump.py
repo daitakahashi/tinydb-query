@@ -47,26 +47,33 @@ def insert_from_object(db, object_input):
     db.table(table_name).clear_cache()
 
 
+class InputError(Exception):
+    pass
+
+
 def main():
     try:
         _main(sys.argv)
-    except RuntimeError as exc:
-        print(exc, file=sys.stderr)
+    except InputError as exc:
+        print(f'input error: {exc}', file=sys.stderr)
         sys.exit(-1)
 
 
 def _main(argv):
     args = parse_args(argv[1:])
-    input_json = json.load(sys.stdin)
+    try:
+        input_json = json.load(sys.stdin)
+    except json.decoder.JSONDecodeError as exc:
+        raise InputError(str(exc)) from exc
+    if not isinstance(input_json, (list, dict)):
+        raise InputError('input must be a list or a dictionary')
     with tinydb.TinyDB(
             args.output, storage=CachingMiddleware(JSONStorage)
     ) as db:
         if isinstance(input_json, list):
             insert_from_array(db, input_json)
-        elif isinstance(input_json, dict):
-            insert_from_object(db, input_json)
         else:
-            raise RuntimeError('input must be a list or a dictionary')
+            insert_from_object(db, input_json)
 
 
 if __name__ == '__main__':
